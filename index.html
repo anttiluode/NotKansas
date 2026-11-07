@@ -69,6 +69,7 @@
   <div class="t">THE MOON</div>
   <label class="ck"><input type="checkbox" id="hyp" checked> the inside is hyperbolic (K)</label>
   <div class="sl">crystal per cube <output id="tsO"></output></div><input type="range" id="ts" min="15" max="90" step="1" value="40">
+  <div class="sl">the honeycomb's frame <output id="frO"></output></div><input type="range" id="fr" min="0" max="1.5" step="0.05" value="0.6">
   <div class="t sub">THE LAWS OF THIS LEVEL</div>
   <div class="sl">body wavelength <output id="lcO"></output></div><input type="range" id="lc" min="7" max="16" step="0.1">
   <div class="sl">lattice wavelength <output id="lfO"></output></div><input type="range" id="lf" min="3.8" max="6.5" step="0.1">
@@ -575,7 +576,7 @@ vec3 innerView(vec3 q, vec3 d){
 // fold(): reflect a point into one chamber (x ≥ y ≥ z ≥ 0 inside the central cube): abs and sort are the cube's
 // own mirrors, and the cube's face is a sphere orthogonal to the boundary (centre FC, radius √FR2); inverting
 // in it is a hyperbolic reflection. k counts the face reflections: which layer of cubes the point is in.
-uniform int uHyper, uInside; uniform vec3 uCamX, uKC; uniform float uKS;
+uniform int uHyper, uInside; uniform vec3 uCamX, uKC; uniform float uKS, uFrame3;
 const vec3 FC = vec3(2.0581710272714924, 0.0, 0.0);
 const float FR2 = 3.2360679774997896;     // radius² = 1 + √5, and FC.x² = 2 + √5 = 1 + FR2: orthogonal to the boundary
 vec3 fold(vec3 p, out float k){
@@ -591,16 +592,27 @@ vec3 fold(vec3 p, out float k){
   }
   return p;
 }
-// the boundary at infinity: your camera if it is on, otherwise the glow of the world outside
+// the boundary at infinity: your camera if it is on, otherwise a deep glow with the sky's stars
 vec3 boundaryAt(vec3 u){
-  vec3 g = hsv(uHue, 0.35, 0.55) + skyBase(u, uHue) * 2.0;
+  vec3 g = hsv(uHueIn + 0.5, 0.55, 0.22) + skyBase(u, uHue) * 2.5;
   return uCamSky > 0.0 ? mix(g, camEnv(u, uHue) * 1.4, uCamSky) : g;
+}
+// the honeycomb's own frame: crystal struts along the cube edges and knots at the corners, of fixed
+// hyperbolic thickness (uFrame3 = 0 removes it). In the chamber, the face is the sphere |p − FC| = √FR2 and the
+// cube edge is where it meets the mirror x = y; the corner is where it meets x = y = z.
+float frameAt(vec3 p){
+  if (uFrame3 <= 0.0) return -1e3;
+  float s = length(p - FC) - sqrt(FR2), sc = 2.0 / (1.0 - dot(p, p));          // Euclidean → hyperbolic length
+  float edge = length(vec2(s, (p.x - p.y) * 0.70710678)) * sc;
+  float knot = length(vec3(s, (p.x - p.y) * 0.70710678, (p.y - p.z) * 0.70710678)) * sc;
+  float th = 0.055 * uFrame3;
+  return max(1.0 - edge / th, 1.0 - knot / (2.2 * th));                         // > 0 inside a strut or knot
 }
 float hfield(vec3 x, out float k, out vec4 a, out vec3 w){
   vec3 p0 = fold(x, k);
   w = uKC + p0 * uKS;
   a = sampleV(uW1, w);
-  return uPolIn * a.x;
+  return max(uPolIn * a.x, uIsoIn * (1.0 + frameAt(p0)));
 }
 // march a hyperbolic geodesic: index n = 2/(1 − r²) in ball units, so the ray equation gives
 // dd = h (x − (x·d) d) per hyperbolic step h, and the Euclidean step is h (1 − r²)/2
@@ -628,7 +640,7 @@ vec3 hyperView(vec3 x, vec3 d){
       float hue = uHueIn + 0.045 * kk + 0.5 * mod(kk, 2.0) * 0.12;
       vec3 bl = boundaryAt(normalize(hi));
       vec3 col = crystal(n, d, aa.y, depth, hue, ww, lm, normalize(hi + 1e-5), bl);
-      col = mix(col, bl, 1.0 - exp(-tH * 0.16));                          // far in hyperbolic distance: the boundary's haze
+      col = mix(col, bl, 1.0 - exp(-tH * 0.09));                          // far in hyperbolic distance: the boundary's haze
       col = mix(col, bl, smoothstep(0.86, 0.97, rr));                     // the cubes shrink below a pixel: the cutoff
       return col + glow;
     }
@@ -813,7 +825,7 @@ const camData = new Float32Array(2 * CW * CH);
 function uploadCam() { gl.bindTexture(gl.TEXTURE_2D, CAMTEX); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, CW, CH, gl.RG, gl.FLOAT, camData); }
 uploadCam();
 const camCfg = { on: false, gain: 0.9, motion: 1.0, lens: 1.2, inMoon: true, sky: 0.85 };
-const cfg = { glue: 1.0, glass: 0.6, shaft: 1.0, noise: 0.002, bent: true, hold: true, hyper: true, tile: 40 };
+const cfg = { glue: 1.0, glass: 0.6, shaft: 1.0, noise: 0.002, bent: true, hold: true, hyper: true, tile: 40, frame: 0.6 };
 let insideH = false;
 const MC = () => [CM.MOON.c[0] + 0.5, CM.MOON.c[1] + 0.5, CM.MOON.c[2] + 0.5];
 const ballOf = (p) => { const m = MC(); return [(p[0] - m[0]) / CM.MOON.R, (p[1] - m[1]) / CM.MOON.R, (p[2] - m[2]) / CM.MOON.R]; };
@@ -1077,6 +1089,7 @@ bind('res', (v) => Math.round(v * 100) + '%', () => resize());
 $('bent').onchange = () => { cfg.bent = $('bent').checked; };
 $('hyp').onchange = () => { cfg.hyper = $('hyp').checked; if (!cfg.hyper && insideH) leaveHyper(); };
 bind('ts', (v) => v.toFixed(0) + ' voxels', (v) => { cfg.tile = v; });
+bind('fr', (v) => v.toFixed(2), (v) => { cfg.frame = v; });
 $('hold').onchange = () => { cfg.hold = $('hold').checked; if (!cfg.hold) autoScale = 1; resize(); };
 $('seedBtn').onclick = () => seedAhead();
 $('meltBtn').onclick = () => { seedWorld(outer, null); flash(`LEVEL ${outer.level}`, 'melted — it will grow again'); };
@@ -1203,7 +1216,7 @@ function render(now) {
     uMoonW: mc, uMoonR: CM.MOON.R, uSteps: { int: 120 }, uStepsIn: { int: 96 },
     uCamSky: camCfg.on ? camCfg.sky : 0, uVidAspect: camAspect, uGlass: cfg.glass, uShaft: cfg.shaft,
     uHyper: { int: cfg.hyper ? 1 : 0 }, uInside: { int: insideH ? 1 : 0 }, uCamX: ballOf(cam.p),
-    uKC: inner.law.islands[0].c.map((v) => v + 0.5), uKS: cfg.tile,
+    uKC: inner.law.islands[0].c.map((v) => v + 0.5), uKS: cfg.tile, uFrame3: cfg.frame,
   }, { uV1: outer.V1, uV2: outer.V2, uW1: inner.V1, uW2: inner.V2, uVid: VIDTEX });
 }
 function tick(now) {
